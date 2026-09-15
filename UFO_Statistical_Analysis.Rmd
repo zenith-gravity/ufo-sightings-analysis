@@ -1,0 +1,532 @@
+---
+title: "UFO Sightings Statistical Analysis"
+author: "Melissa Suda Holtmann"
+date: "2026-09-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(dplyr)
+```
+
+# Introduction
+This report explores patterns within reported UFO sightings. The current analysis focuses on whether the time of day a UFO sighting occurs is associated with the duration of the sighting:
+
+## Research Question
+Is the time of day a UFO sighting occurs associated with the duration of the the sighting?
+
+### Hypothesis
+UFO sighting duration is associated with the time of day when the sighting occurs.
+
+
+# Data Preparation
+
+
+## Loading the Dataset
+
+The UFO sightings dataset is stored as a CSV file within the project's data folder. The following code loads the dataset into R for analysis.
+
+```{r}
+ufo <- read.csv("data/ufo_sightings.csv")
+```
+
+### Inspect the data
+
+How many rows and columns dose this data set contain?
+```{r}
+dim(ufo)
+```
+
+What are the column labels?
+```{r}
+names(ufo)
+```
+
+Look at the first 10 rows.
+```{r}
+head(ufo, 10)
+```
+from the head we can see that there are some missing values in the state and country. It dose not affect our current target, but it is worth noting.
+
+
+What are the variables?
+```{r}
+str(ufo)
+```
+
+From this probe we find the columns that we wish to use mathematical analysis on are Chr data types and will need to be changed before they can be useful. 
+
+## Persevere the data
+To make sure the original data is perverse before changing the original structure we will make a copy. This will prevent any of the orginal infomation from getting lost. 
+Did the duration..seconds. column become a char because some values have 30 sec in a few records? If so would the conversion delete those rows. 
+
+I do not know so we will error on the side of safe and create a copy. Therefore 
+
+orginal database -> ufo
+cleaned database -> ufo_clean
+
+```{r}
+ufo_clean <- ufo
+```
+
+### Convert The Data
+Here we will start with converting the duration_seconds to numeric
+
+```{r}
+ufo_clean$duration_seconds <- as.numeric(ufo_clean$duration..seconds.)
+```
+
+In doing this We see the *Warning message: NAs introduced by coercion*
+this means some of the data has been changed into NA's. let's see how many were affected.
+
+```{r}
+sum(is.na(ufo_clean$duration_seconds))
+```
+We see 3
+How many of the original data had NA's?
+
+```{r}
+sum(is.na(ufo$duration..seconds.))
+```
+Although I no do think that is enough information to be worried about, I want to see what is causing this issue. 
+
+```{r}
+ufo_clean$duration..seconds.[is.na(ufo_clean$duration_seconds) & !is.na(ufo_clean$duration..seconds.)]
+```
+It looks like we are very lucky were the same typo appears for each. Here we Will get rid of the ` mark 
+
+```{r}
+ufo_clean$duration_seconds <- as.numeric(
+  gsub("`", "", ufo_clean$duration..seconds.))
+```
+
+Checking to see if it worked
+
+```{r}
+sum(is.na(ufo_clean$duration_seconds))
+```
+Great! it worked let's peek at what the data is telling us about the duration.
+```{r}
+summary(ufo_clean$duration_seconds)
+```
+There are a few things that are worth thinking about when we look at the summary of time.
+        + How is there a duration of 0 seconds
+        + How is the max time of 97,836,000 seconds / 3.1 years
+        + The median is 180 but the mean is 9,017 (is that skewed by the max?)
+        + 75% of the sightings are less than 600 seconds/ 10 minutes
+        
+It is highly likely that this data will not have a normal distribution given that the mean and median are a magnitude of order different from each other. This could mean that the traditional t-test is not the best option.
+        
+        
+**datetime data conversion** We just completed the data conversion for the duration in seconds now we need to begin with the date time. Converting it to a numeric I would like to also separate out all of the information in this one column. Currently it has a format of date, hour, min, seconds. I will need the hour to determine if it is day or night for this current hypothesis, my next hypothesis will need the year, and the third will need the month.
+
+The plan is to do the following
+
+datetime                 original information
+sighting_datetime        properly converted R date-time
+sighting_date            date only
+year                     1949
+month                    10
+hour                     20
+duration_seconds        numeric duration ---> this is done
+
+For sighting_datetime I found POSIXct to use exatly for this
+
+```{r}
+ufo_clean$sighting_datetime <- as.POSIXct(ufo_clean$datetime, format = "%Y-%m-%d %H:%M:%S")
+```
+
+Check to see if it worked
+
+```{r}
+class(ufo_clean$sighting_datetime)
+```
+
+Just like for the seconds I did some investigation of the data to see if there were any NA's that were not there before. This time 4 were found, after further investigation the 4 NA occurred because of daylight savings time. The "easy fix" for this is to tell R to not apply the computer;s Eastern-time daylight-saving rules
+
+```{r}
+ufo_clean$sighting_datetime <- as.POSIXct(
+    ufo_clean$datetime,
+    format = "%Y-%m-%d %H:%M:%S",
+    tz = "UTC"
+)
+
+```
+
+Moving on to create our date, year, month and hour
+
+```{r}
+ufo_clean$sighting_date <- as.Date(ufo_clean$sighting_datetime)
+
+ufo_clean$year <- as.integer(
+  format(ufo_clean$sighting_datetime, "%Y")
+)
+
+ufo_clean$month <- as.integer(
+  format(ufo_clean$sighting_datetime, "%m")
+)
+
+ufo_clean$hour <- as.integer(
+  format(ufo_clean$sighting_datetime, "%H")
+)
+```
+
+
+Check it to make sure it worked
+
+```{r}
+head(
+  ufo_clean[
+    c("datetime", "sighting_date", "year", "month", "hour",
+      "duration_seconds")
+  ],
+  10
+)
+```
+
+Since we have the hours out lets see how many sightings by hour
+
+```{r}
+table(ufo_clean$hour)
+```
+
+
+Looking at this let divide this into 4 sections
+
+Overnight   0–5
+Morning     6–11
+Afternoon   12–17
+Evening     18–23
+
+```{r}
+ufo_clean$time_period <- cut(
+  ufo_clean$hour,
+  breaks = c(-1, 5, 11, 17, 23),
+  labels = c("Overnight", "Morning", "Afternoon", "Evening")
+)
+```
+
+Let's look at this in a table form
+
+```{r}
+table(ufo_clean$time_period)
+```
+
+## Viewing the data
+
+Remember how the mean and median were very different and the max value was much larger than the 3rd quarter/75% of the data? Spoiler alert I looked at the max data's description. The description stated that it was only a few seconds. Most likely it is a typo, but reading 80k plus descriptions is a bit much, so lets see if math can help.
+
+```{r}
+ggplot(ufo_clean, aes(x = time_period, y = duration_seconds / 60)) +
+  geom_boxplot() +
+  labs(
+    title = "UFO Sighting Duration by Time of Day",
+    x = "Time of Day",
+    y = "Duration (Minutes)"
+  )
+```
+
+# Question 1
+
+I am going to start with grouping the hourly duration using the dplyr library. We should expect to see 24 groups
+
+```{r}
+hourly_duration <- ufo_clean %>% group_by(hour) %>% summarise(median_duration_seconds = median(median(duration_seconds)))
+
+dim(hourly_duration)
+```
+Let's add a row for munitues
+```{r}
+hourly_duration <- ufo_clean %>%
+  group_by(hour) %>%
+  summarise(median_duration_seconds = median(duration_seconds)
+  ) %>%
+  mutate(median_duration_minutes = median_duration_seconds / 60)
+
+print(hourly_duration, n = 24)
+```
+
+I decided to go with the box plot and use a log10 scale because we have observed that there is a large right tail to this dataset that can still be useful.
+
+```{r}
+ggplot(ufo_clean, aes(x = time_period, y = duration_seconds / 60)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  labs(
+    title = "UFO Sighting Duration by Time of Day",
+    x = "Time of Day",
+    y = "Duration (Minutes, Log Scale)"
+  )
+```
+
+The boxplot shows that the median UFP sighting duration is similar across the four time periods. However, there is some variation in the interquartile ranges (between Q1 and Q3), with overnight sightings showing a wider spread in the middle 50% of reported duration. the distributions are also strongly right-skewed, with many high-duration outliers across the four time periods.
+
+The logarithmic scal is used because the repoted UPF sighting duration spans a very large range. on the y-axis each increase represents an order of magnitude. This allows the more abundent short duration sightingd to remain visible withour being compressed by the small number of extermely long-duration sightings. 
+
+# Question 2
+
+```{r}
+duration_summary <- ufo_clean %>%
+  group_by(time_period) %>%
+  summarise(
+    count = n(),
+    Q1_minutes = quantile(duration_seconds / 60, 0.25),
+    median_minutes = median(duration_seconds / 60),
+    Q3_minutes = quantile(duration_seconds / 60, 0.75),
+    IQR_minutes = IQR(duration_seconds / 60)
+  )
+
+duration_summary
+```
+
+Although the median reported sighting duration is 3 for all four time periods the larger interquartile range(IQR) is seen in the overnight as seen in the previous boxplot.
+
+with that in mind the IQR/variability is easier to see in the chart below. It dose not mean that the sightings are longer, it only means that there is more variability during this time range.
+
+```{r}
+ggplot(duration_summary,
+       aes(x = time_period, y = IQR_minutes)) +
+  geom_col() +
+  labs(
+    title = "Variation in UFO Sighting Duration by Time of Day",
+    x = "Time of Day",
+    y = "Interquartile Range (Minutes)"
+  )
+```
+
+# Question 3
+
+For question 3 we are asking "Is there a measurable statistical relationship between time of day and sighting duration?". for this questions we will look deeper into correlation, R^2, p-value, scatterplot and regression line. this section will be a little different because of the large duration times. like with the box plot using the log10 scale so the right tail dose not dominate the data we will use the log10 scale for the regression process as well.
+
+lets look at one of the main differences when interpenetrating the data. Notice how the median is not 3 like we previously calulated or is it? 
+
+It is because we are looking at the log10 format the data is based off of log 10. so if you take 10^2.255273 is about 180 seconds which is the 3 minutes. Likewise when you see the -3 that is 0.001 seconds. This is very useful and needed because our values span over orders of magnitude. So we are thinking about the ratios rather than enormous absolute differences.
+
+```{r}
+# Log-transform sighting duration to reduce the effect of extreme right-skew
+ufo_clean$log_duration <- log10(ufo_clean$duration_seconds)
+
+summary(ufo_clean$log_duration)
+```
+### Apply correlation 
+
+let's take a look at the correlation
+
+```{r}
+duration_correlation <- cor.test(
+  ufo_clean$hour,
+  ufo_clean$log_duration,
+  method = "pearson"
+)
+
+duration_correlation
+```
+First we see that the correlation number is r = -0.01324. with the Pearson's model it ranges from -1 to 1 where 0 represents no relationship. since we are really close to 0 the negative linear relationship is essentially negligible.
+Interesting the p value is 0.0001747 where the significance level is 0.05, so this says that the correlation is statistically significant. The negative linear relationship is extremely week. Therefore, the hour of day explains very little of the variation in sighting duration through a simple linear relationship.
+
+### R^2
+
+```{r}
+(-0.0132413 )^2*100
+```
+This shows the hour of day explains only 0.018% of the variation in log-transformed UFO sighting duration within this linear model. This meas that the linear model dose not fit, but it dose not yet prove the theory wrong.
+
+##Scatter plot
+
+```{r}
+ggplot(
+  ufo_clean,
+  aes(x = hour, y = log_duration)
+) +
+  geom_jitter(
+    width = 0.2,
+    height = 0,
+    alpha = 0.05
+  ) +
+  geom_smooth(
+    method = "lm",
+    se = FALSE
+  ) +
+  labs(
+    title = "Relationship Between Time of Day and UFO Sighting Duration",
+    x = "Hour of Day",
+    y = "Log10 Sighting Duration (Seconds)"
+  )
+```
+
+The Pearson correlation and simple linear regression were used to examine the relationship between hour of day and log10- transformed  UFO sighting duration. The correlation was statistically significant (r = -0.0132, p = 0.0001747), but the magnitude of the relationship was extremely weak. The linear regression produced an R^2 of 0.000175. that indicated that our hour of day explained approximately 0.018% of the variation in the log-transformed sighting duration. 
+The scatterplot supports this result, as the regression line is essentially horizontal and no strong linear pattern is visible.
+
+Therefore, although the relationship is statistically significant, the results provide little evidence of a meaningful linear relationship between hour of day and sighting duration
+
+
+# Question 4
+
+Here is a histogram using the log10 so the small number of long duration numbers do not over power the average UFO sightings numbers. As we saw earlier the data transformation is more balanced than the original data but it is not perfectly symmetric and the right tail remains. Several peaks are also visible, which may reflect the tendency for reported sighting duration to occur at a common rounded values.
+
+```{r}
+ggplot(ufo_clean, aes(x = log_duration)) +
+  geom_histogram(bins = 48) +
+  labs(
+    title = "Distribution of Log-Transformed UFO Sighting Durations",
+    x = "Log10 of Sighting Duration (Seconds)",
+    y = "Number of Sightings"
+  )
+```
+Let's take a look with more bins 
+
+```{r}
+ggplot(ufo_clean, aes(x = log_duration)) +
+  geom_histogram(bins = 75) +
+  labs(
+    title = "Distribution of Log-Transformed UFO Sighting Durations",
+    x = "Log10 of Sighting Duration (Seconds)",
+    y = "Number of Sightings"
+  )
+```
+
+
+# Question 5
+
+For this section I am going to divide the data into two groups.
+
+* Group 1: Day will be defined as 06:00-17:59
+* Group 2: Night will be defined as 18:00-05:59
+
+```{r}
+ufo_clean$day_night <- ifelse(
+  ufo_clean$hour >= 6 & ufo_clean$hour < 18,
+  "Day",
+  "Night"
+)
+
+ufo_clean$day_night <- factor(
+  ufo_clean$day_night,
+  levels = c("Day", "Night")
+)
+
+table(ufo_clean$day_night)
+```
+
+Since we already know that the data is right skew we might need to continue with log10 transformations.From the simple count table we can see that about 80% of the sightings are in the nigth group. However we should look at how the data looks in the groups before deciding.
+
+```{r}
+day_night_summary <- ufo_clean %>%
+  group_by(day_night) %>%
+  summarise(
+    count = n(),
+    median_minutes = median(duration_seconds / 60),
+    mean_minutes = mean(duration_seconds / 60),
+    IQR_minutes = IQR(duration_seconds / 60),
+    mean_log_duration = mean(log_duration),
+    sd_log_duration = sd(log_duration)
+  )
+
+day_night_summary
+```
+
+
+```{r}
+ggplot(
+  ufo_clean,
+  aes(x = day_night, y = log_duration)
+) +
+  geom_boxplot() +
+  labs(
+    title = "Log-Transformed UFO Sighting Duration: Day vs. Night",
+    x = "Time Period",
+    y = "Log10 of Sighting Duration (Seconds)"
+  )
+```
+
+We see that the data is remarkably similar in the typical duration, (again).
+
+    *Standard*
+    
+ ** Mean**
+ 
+ 
+  * Day = 158 min
+  * Night 148 min
+  
+**Median** has the same for both day and night at 3mins. We found this earlier, where the differences between the mean and median highlights how the extreme duration affect the raw data. 
+
+    *log transformation*
+    
+  **Mean**
+  
+  * Day = 2.12
+  * Night = 2.16
+  
+  **Log Standard Deviation**.
+  
+  * Day = 0.918
+  *Night = 0.958
+  
+Given this information I will move forward with the **Welch two-sample t-test**, we are handling unequal group sizes and doesn't require us to assume the two populations have equal variances.
+
+
+### Our Hypotheses
+
+The null hypothesis is:
+
+$$
+H_0: \mu_{Day} = \mu_{Night}
+$$
+
+The alternative hypothesis is:
+
+$$
+H_A: \mu_{Day} \neq \mu_{Night}
+$$
+
+**Running the Test**
+
+```{r}
+day_night_ttest <- t.test(
+  log_duration ~ day_night,
+  data = ufo_clean
+)
+
+day_night_ttest
+```
+As you can see The Welch t-tesr gave us:
+
+ t=-4.4325, and p=9.353x10^-6
+ 
+ Since p<0.05 We reject the null hypotheses that the Day and Night groups have equal mean log-transformed durations. but we also need to look at the size of the difference before knowing what this test is actually telling us.
+ 
+ **Mean**
+ 
+ * Day = 2.121021
+ * Night = 2.157432
+ 
+ Therefore Day-Night = -0.036411, The negative t-statistic, But remember we are using log transformation so we must take a look at 
+ 
+```{r}
+10^0.036411
+```
+This is telling us the geometric-mean duration for Night is approximately 1.087 times the Day value an increase of 8.7%. Again this is not the whole story because the confidence interval of -0.05251195 to -0.02031007 is below zero, it agrees with the p-value: the estimated mean log duration is lower for the day than the night. It dose not cross the zero, so zero difference isn't supported at the 95% confidence level.
+
+
+# Conclusion
+
+The Null hypothesis of equal mean log-transformed duration is rejected; however, the results do not indicate a large practical difference in sighting duration between the Day and Night periods.
+A Welch two-sample t-test was used to compare log10-transformed sighting durations between the Day (06:00–17:59) and Night (18:00–05:59) groups. The test found a statistically significant difference between the groups, t = -4.43, p < 0.001. The mean log10 duration was 2.121 for Day sightings and 2.157 for Night sightings. Although the difference was statistically significant, its magnitude was small. The median duration was 3 minutes and the IQR was 9.5 minutes for both groups, indicating that the typical durations and spread of the middle 50% were very similar. Therefore, the large sample size allowed the test to detect a small difference that may have little practical significance.
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
