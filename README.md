@@ -58,7 +58,9 @@ Future stages of the project may expand the analysis to investigate additional q
 - `UFO_Statistical_Analysis.Rmd` – R Markdown source file containing the statistical analysis
 - `UFO_Statistical_Analysis.html` – Rendered HTML version of the analysis
 - `data/ufo_sightings.csv` – UFO sighting dataset
+- `data/ufo_sightings.json` – JSON version of the UFO sighting dataset used by D3
 - `analysis/` – Earlier R scripts and analysis files
+- `d3_ufo_shapes/` – D3 visualization files, including `index.html` and `script.js`
 
 ## Tools and Technologies
 
@@ -74,9 +76,16 @@ This project uses:
 - Web APIs
 - `curl`
 - `jq`
+- D3
 
 ## Statistical Analysis
 
 The current statistical analysis can be viewed here:
 
 [View the UFO Statistical Analysis](UFO_Statistical_Analysis.html)
+
+## D3 Visualization
+
+The D3 visualization summarizes the most frequently reported UFO shapes. Symbol type represents the reported shape, symbol size represents the number of sightings, and the labels include the average sighting duration in seconds.
+
+[D3 UFO Shapes Visualization](d3_ufo_shapes/)
