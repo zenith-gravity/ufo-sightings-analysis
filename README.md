@@ -88,4 +88,4 @@ The current statistical analysis can be viewed here:
 
 The D3 visualization summarizes the most frequently reported UFO shapes. Symbol type represents the reported shape, symbol size represents the number of sightings, and the labels include the average sighting duration in seconds.
 
-[D3 UFO Shapes Visualization](d3_ufo_shapes/)
+[D3 UFO Shapes Visualization](data/d3_ufo_shapes/)
